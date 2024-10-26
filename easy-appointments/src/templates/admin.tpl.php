@@ -914,7 +914,7 @@
             %>selected="selected"<% } %>>No, but rendered as hidden field</option>
         </select>
     </p>
-    <p><a href="#" class="deletion item-delete">Delete</a> | <a href="#" class="item-save">Apply</a></p>
+    <p><a href="#" class="deletion item-delete" data-id="<%=item.id%>">Delete</a> | <a href="#" class="item-save">Apply</a></p>
 </div>
 </script>
 

@@ -140,6 +140,7 @@ class EATableColumns
             'block_days_tooltip',
             'cal_auto_select',
             'auto_select_slot',
+            'auto_select_option',
             'cancel.scroll',
             'captcha.site-key',
             'captcha3.site-key',
