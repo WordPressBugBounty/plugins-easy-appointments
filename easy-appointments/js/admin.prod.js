@@ -498,7 +498,7 @@
 
             var $li = $btn.closest('li');
             var name = _.unescape('' + $li.data('name'));
-            var element = !!id ? this.fields.findWhere({id: id}) : this.fields.findWhere({ label:name });
+            var element = !!id ? this.fields.findWhere({id: '' + id}) : this.fields.findWhere({ label:name });
 
             this.fields.remove(element);
 

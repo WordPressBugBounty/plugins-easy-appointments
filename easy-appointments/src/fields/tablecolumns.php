@@ -123,6 +123,7 @@ class EATableColumns
             return;
         }
 
+
         foreach ($params as $key => $param) {
             if (!in_array($key, $columns)) {
                 unset($params[$key]);
