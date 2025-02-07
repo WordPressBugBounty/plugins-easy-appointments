@@ -5,7 +5,7 @@ Tags: appointment, appointments, Booking, calendar, reservation
 Requires at least: 3.7
 Tested up to: 6.7
 Requires PHP: 5.3
-Stable tag: 3.12.7
+Stable tag: 3.12.8
 License: GPLv2
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -212,6 +212,11 @@ Note: you can have only one calendar on one page.
 25. Admin panel - Report - Export page
 
 == Changelog ==
+
+= 3.12.8 (2025-02-07)
+* Removed Easy word from Manu Name
+* Added feature of Help & Suppport
+* Added Premium Extension link in the menu
 
 = 3.12.7 (2025-01-28)
 * Tested with WordPress 6.7
