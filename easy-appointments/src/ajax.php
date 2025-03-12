@@ -99,16 +99,15 @@ class EAAjax
         add_action('wp_ajax_ea_month_status', array($this, 'ajax_month_status'));
         add_action('wp_ajax_nopriv_ea_month_status', array($this, 'ajax_month_status'));
         // end frontend
-        
+
         // admin ajax section
         if (is_admin() && is_user_logged_in()) {
-            
+
             // user must have at least edit posts capability in order to use those endpoints
             if (!current_user_can('edit_posts')) {
                 return;
             }
-            add_action('wp_ajax_ea_send_query_message', array( $this, 'ea_send_query_message'));
-            
+
             add_action('wp_ajax_ea_save_custom_columns', array($this, 'save_custom_columns'));
 
             add_action('wp_ajax_ea_errors', array($this, 'ajax_errors'));
@@ -126,6 +125,9 @@ class EAAjax
 
             // Service
             add_action('wp_ajax_ea_service', array($this, 'ajax_service'));
+
+            // Service
+            add_action('wp_ajax_ea_update_order', array($this, 'ajax_update_order'));
 
             // Locations
             add_action('wp_ajax_ea_locations', array($this, 'ajax_locations'));
@@ -164,51 +166,7 @@ class EAAjax
             add_action('wp_ajax_ea_default_template', array($this, 'ajax_default_template'));
         }
     }
-    public function ea_send_query_message(){   
-		    
-        if ( ! isset( $_POST['ezappoint_security_nonce'] ) ){
-           return; 
-        }
-        if ( !wp_verify_nonce( $_POST['ezappoint_security_nonce'], 'ea_send_query_message' ) ){
-           return;  
-        }   
-        if ( !current_user_can( 'manage_options' ) ) {
-            return;  					
-        }
-        $message        = sanitize_textarea_field($_POST['message']); 
-        $email          = sanitize_email($_POST['email']);
-                                
-        if(function_exists('wp_get_current_user')){
-            $user           = wp_get_current_user();
-            $message = '<p>'.$message.'</p><br><br>'.'Query from Easy Appointment plugin support';
-            
-            $user_data  = $user->data;        
-            $user_email = $user_data->user_email;     
-            
-            if($email){
-                $user_email = $email;
-            }            
-            //php mailer variables        
-            $sendto    = 'team@magazine3.in';
-            $subject   = "Easy Appointement Query";
-            $headers[] = 'Content-Type: text/html; charset=UTF-8';
-            $headers[] = 'From: '. esc_attr($user_email);            
-            $headers[] = 'Reply-To: ' . esc_attr($user_email);
-            // Load WP components, no themes.   
-            $sent = wp_mail($sendto, $subject, $message, $headers); 
-            if($sent){
 
-                 echo wp_json_encode(array('status'=>'t'));  
-
-            }else{
-                echo wp_json_encode(array('status'=>'f'));            
-
-            }
-            
-        }
-                        
-        wp_die();           
-}
     public function ajax_front_end()
     {
         $this->validate_nonce();
@@ -321,6 +279,21 @@ class EAAjax
         $data['ip'] = $_SERVER['REMOTE_ADDR'];
 
         $data['session'] = session_id();
+
+        if (is_user_logged_in() ) {
+            $current_user_id = get_current_user_id();
+            $data['user'] = $current_user_id;
+        }
+
+        $check = $this->logic->can_make_reservation_by_user($data);
+
+        if (!$check['status'] && is_user_logged_in()) {
+            $resp = array(
+                'err'     => true,
+                'message' => $check['message']
+            );
+            $this->send_err_json_result(json_encode($resp));
+        }
 
         $check = $this->logic->can_make_reservation($data);
 
@@ -627,6 +600,43 @@ class EAAjax
 
         $this->parse_single_model('ea_services');
     }
+    /**
+     * Service model
+     */
+    public function ajax_update_order()
+    {
+        $this->validate_admin_nonce();
+        $raw_data = file_get_contents('php://input');
+        $data = json_decode($raw_data, true);
+        if (isset($data['sequence_data']) && !empty($data['sequence_data'])) {
+            $this->update_multiple_service_sequences($data['sequence_data']);
+            die(json_encode(['status' => true]));
+        }
+        die(json_encode(['status' => false]));
+
+
+    }
+
+    public function update_multiple_service_sequences($data) {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'ea_services';
+        foreach ($data as $row) {
+            if (!isset($row['id']) || !isset($row['sequence'])) {
+                continue;
+            }
+    
+            $id = $row['id'];
+            $sequence = $row['sequence'];
+            $update_data = array(
+                'sequence' => $sequence
+            );
+            $where = array(
+                'id' => $id
+            );
+            $updated = $wpdb->update($table_name, $update_data, $where);
+        }
+    }
+    
 
     /**
      * Services collection
