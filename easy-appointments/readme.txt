@@ -5,7 +5,7 @@ Tags: appointment, appointments, Booking, calendar, reservation
 Requires at least: 3.7
 Tested up to: 6.7
 Requires PHP: 5.3
-Stable tag: 3.12.9
+Stable tag: 3.12.9.1
 License: GPLv2
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -212,6 +212,9 @@ Note: you can have only one calendar on one page.
 25. Admin panel - Report - Export page
 
 == Changelog ==
+= 3.12.9.1 (2025-03-22)
+* Fixed Contact form in plugin setting not working #128
+
 = 3.12.9 (2025-03-12)
 * Added an option to set appointment limits Per logged in user instead of IP. #98
 * Fixed Reminder Not Functioning, and Twilio SMS Displayed by Default #96
