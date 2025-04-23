@@ -5,7 +5,7 @@ Tags: appointment, appointments, Booking, calendar, reservation
 Requires at least: 3.7
 Tested up to: 6.7
 Requires PHP: 5.3
-Stable tag: 3.12.9.1
+Stable tag: 3.12.10
 License: GPLv2
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -212,8 +212,15 @@ Note: you can have only one calendar on one page.
 25. Admin panel - Report - Export page
 
 == Changelog ==
-= 3.12.9.1 (2025-03-22)
-* Fixed Contact form in plugin setting not working #128
+= 3.12.10 (2025-04-23)
+* Tested with WordPress 6.8 #140
+* Fixed An Alert pop-ups saying "Undefined" if user selects a slot that does not have sufficient time gap #129
+* Fixed Conflict issue with 3.12.9. version. #131
+* Fixed #start# is not getting saved in the email confirmation settings (User Specific) #125
+* Added Publish Connection Page #122
+* Added a proper thank you message on booking submission and add book again button #120
+* Added Make the Appointment Booking Form method easy to add #116
+* Added an Option to Cancel All Appointments at Once with Email Notifications and a Customizable Reason. #100
 
 = 3.12.9 (2025-03-12)
 * Added an option to set appointment limits Per logged in user instead of IP. #98
