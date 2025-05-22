@@ -5,7 +5,7 @@ Tags: appointment, appointments, Booking, calendar, reservation
 Requires at least: 3.7
 Tested up to: 6.8
 Requires PHP: 5.3
-Stable tag: 3.12.11
+Stable tag: 3.12.11.1
 License: GPLv2
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
