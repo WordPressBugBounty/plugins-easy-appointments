@@ -3,9 +3,9 @@ Contributors: easyappointments
 Donate link: https://easy-appointments.com/
 Tags: appointment, appointments, Booking, calendar, reservation
 Requires at least: 3.7
-Tested up to: 6.8
+Tested up to: 6.9
 Requires PHP: 5.3
-Stable tag: 3.12.15
+Stable tag: 3.12.20
 License: GPLv2
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -87,6 +87,8 @@ There is extension plugin that you can buy and add to your Easy Appointments plu
     - Mail
 * WooCommerce integration
 * PayPal integration
+* WhatsApp Notification integration
+* AI Booking Assistant
 
 For more info follow the link for <a href="https://easy-appointments.com/#extension">Extension plugin</a>
 
@@ -183,6 +185,16 @@ Value is worker #id number. Examples :
 
 Note: you can have only one calendar on one page.
 
+== External services ==
+
+FullCalendar
+
+This plugin uses the FullCalendar JavaScript library to display interactive calendars and events within the plugin interface.
+FullCalendar itself does not collect or transmit personal data. All calendar data is generated and managed locally within the plugin or retrieved from configured services such as Google Calendar.
+
+This service is provided by FullCalendar LLC
+Terms of use and Policy : https://fullcalendar.io/license
+
 == Screenshots ==
 
 1. Responsive front end two column `[ea_bootstrap layout_cols="2"]` - part1
@@ -212,6 +224,45 @@ Note: you can have only one calendar on one page.
 25. Admin panel - Report - Export page
 
 == Changelog ==
+= 3.12.20 (2026-01-31)
+* Added Full compatibilty with Polylang Plugin. #189
+* Added AI Chatbot for bookings #113
+* Added option to custom color in Google Calendar booking #242
+* Fixed Location in ea_bootstrap creating problem #235
+* Fixed Conflict with wpbakery builder #238
+* Fixed Need to check with vacation saving funtionality. #236
+
+
+= 3.12.19 (2026-01-15)
+* Added message integration with WhatsApp #227
+* Added an option to set different email subjects for each email. #209
+* Fixed Latest plugin version 3.12.16 have php deprecated issues when using php 8.1+ #205
+* Fixed Using php 8.2 there are several PHP Deprecated notices #202
+* Fixed PHP 8.2 Deprecated Warnings in Easy Appointments Plugin (Dynamic Properties & strpos() Warning) #200
+* Fixed Total price is not shown in frontend #233
+* Enhancement Improvement in stripe setup #232
+
+= 3.12.18 (2026-01-07)
+* Added an option for single-user (super admin only) appointment management without customer search field #198
+* Fixed Admin shouldn't be allowed to confirm the booking after time. #216
+* Enhancement Rollback removed the data. #226
+* Enhancement improve the Manage appointmennt in popup option. #225
+* Enhancement PCP check #224
+
+= 3.12.17 (2025-12-12)
+* Added to allow selecting multiple slots at a time. #180
+* Added an option to delete the bulk connections. #217
+* Added an Auto-Cancellation Issue Caused by Google Calendar API Pagination/Sync Errors #215
+* Added news letter subscribe option as we have in our other plugins #214
+* Fixed Reservation is not displaying correctly in the full calendar on mobile and tablet devices. #179
+* Fixed In Customer list admin page using php 8.2 there are several PHP Deprecated notices #213
+* Enhancement We need to improve two-way connectivity with Google Calendar. #221
+
+= 3.12.16 (2025-11-05)
+* Added the time feature in the Vacation section. #196
+* Added Room booking shortcode to list of room to be booked #204
+* Fixed Warnings and other code imrovment
+
 = 3.12.15 (2025-09-18)
 * Added German/European time format needs to be added. #162
 * Added an option to change label of 'Customer Search' #177

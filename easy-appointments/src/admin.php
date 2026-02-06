@@ -33,6 +33,26 @@ class EAAdminPanel
     protected $datetime;
 
     /**
+     * @var array
+     */
+    protected $customers = [];
+
+    /**
+     * @var string
+     */
+    protected $search = '';
+
+    /**
+     * @var int
+     */
+    protected $paged = 1;
+
+    /**
+     * @var int
+     */
+    protected $total_pages = 1;
+
+    /**
      * EAAdminPanel constructor.
      * @param EAOptions $options
      * @param EALogic $logic
@@ -61,36 +81,7 @@ class EAAdminPanel
 
     }
 
-    public function handle_customers_ajax() {
-        global $wpdb;
 
-        $table = $wpdb->prefix . 'ea_customers';
-        $per_page = 10;
-        $paged = isset($_POST['paged']) ? max(1, intval($_POST['paged'])) : 1;
-        $offset = ($paged - 1) * $per_page;
-
-        $search = isset($_POST['search']) ? sanitize_text_field($_POST['search']) : '';
-        $search_sql = '';
-        $params = [];
-
-        if (!empty($search)) {
-            $search_sql = "WHERE name LIKE %s OR email LIKE %s OR mobile LIKE %s";
-            $like = '%' . $wpdb->esc_like($search) . '%';
-            $params = [$like, $like, $like];
-        }
-
-        $total_sql = "SELECT COUNT(*) FROM $table " . ($search_sql ? $search_sql : '');
-        $total_customers = $wpdb->get_var($wpdb->prepare($total_sql, ...$params));
-
-        $query_sql = "SELECT * FROM $table " . ($search_sql ? $search_sql : '') . " ORDER BY id DESC LIMIT %d OFFSET %d";
-        $customers = $wpdb->get_results($wpdb->prepare($query_sql, ...array_merge($params, [$per_page, $offset])));
-
-        wp_send_json([
-            'data' => $customers,
-            'total_pages' => ceil($total_customers / $per_page),
-            'paged' => $paged,
-        ]);
-    }
 
     public function handle_update_customer_ajax() {
         if ( ! current_user_can('manage_options') ) {
@@ -100,13 +91,33 @@ class EAAdminPanel
         check_ajax_referer('ea_customer_edit', 'ea_nonce');
 
         $table = $wpdb->prefix . 'ea_customers';
-        $id = intval($_POST['id']);
-        $data = [
-            'name' => sanitize_text_field($_POST['name']),
-            'email'=> sanitize_email($_POST['email']),
-            'mobile'=> sanitize_text_field($_POST['mobile']),
-            'address'=> sanitize_text_field($_POST['address']),
-        ];
+        if ( ! isset( $_POST['id'] ) ) {
+            wp_send_json_error(
+                array( 'message' => esc_html__( 'Missing ID.', 'easy-appointments' ) ),
+                400
+            );
+        }
+
+        $id = intval( wp_unslash( $_POST['id'] ) );
+        $data = array(
+            'name'    => isset( $_POST['name'] )
+                ? sanitize_text_field( wp_unslash( $_POST['name'] ) )
+                : '',
+
+            'email'   => isset( $_POST['email'] )
+                ? sanitize_email( wp_unslash( $_POST['email'] ) )
+                : '',
+
+            'mobile'  => isset( $_POST['mobile'] )
+                ? sanitize_text_field( wp_unslash( $_POST['mobile'] ) )
+                : '',
+
+            'address' => isset( $_POST['address'] )
+                ? sanitize_text_field( wp_unslash( $_POST['address'] ) )
+                : '',
+        );
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $updated = $wpdb->update($table, $data, ['id' => $id]);
         if ($updated !== false) {
             wp_send_json_success();
@@ -120,12 +131,14 @@ class EAAdminPanel
         }
         check_ajax_referer('ea_customer_edit', 'ea_nonce');
 
-        $name    = sanitize_text_field($_POST['name'] ?? '');
-        $email   = sanitize_email($_POST['email'] ?? '');
-        $mobile  = sanitize_text_field($_POST['mobile'] ?? '');
-        $address = sanitize_textarea_field($_POST['address'] ?? '');
+        $name    = isset($_POST['name'])    ? sanitize_text_field(wp_unslash($_POST['name']))    : '';
+        $email   = isset($_POST['email'])   ? sanitize_email(wp_unslash($_POST['email']))        : '';
+        $mobile  = isset($_POST['mobile'])  ? sanitize_text_field(wp_unslash($_POST['mobile']))  : '';
+        $address = isset($_POST['address']) ? sanitize_textarea_field(wp_unslash($_POST['address'])) : '';
+
 
         global $wpdb;
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
         $inserted = $wpdb->insert("{$wpdb->prefix}ea_customers", [
             'name'    => $name,
             'email'   => $email,
@@ -346,9 +359,15 @@ class EAAdminPanel
         }
 
         // we need tinyMce for WYSIWYG editor
-        wp_enqueue_script('tinymce_js', includes_url( 'js/tinymce/' ) . 'wp-tinymce.php', array( 'jquery' ), false, true );
+        wp_enqueue_script(
+            'tinymce_js',
+            includes_url( 'js/tinymce/' ) . 'wp-tinymce.php',
+            array( 'jquery' ),
+            EASY_APPOINTMENTS_VERSION,
+            true
+        );
         wp_enqueue_script('ea-tinymce');
-        wp_enqueue_style('ea-editor-style', includes_url('/css/editor.min.css'));
+        wp_enqueue_style('ea-editor-style', includes_url('/css/editor.min.css'),array(), EASY_APPOINTMENTS_VERSION, true);
 
 //        wp_enqueue_script( 'time-picker-i18n' );
         wp_enqueue_script('ea-settings');
@@ -360,6 +379,14 @@ class EAAdminPanel
         wp_enqueue_style('thickbox');
         wp_enqueue_style('jquery-chosen');
         wp_enqueue_style('ea-admin-fonts-css');
+
+        $object_name = array(
+            'ajax_url'                  => admin_url( 'admin-ajax.php' ),
+            'ea_security_nonce'   => wp_create_nonce('ea_ajax_check_nonce'),
+        );
+        $object_name = apply_filters('easy_ea_localize_filter',$object_name,'ea_obj');
+        
+        wp_localize_script('ea-settings', 'ea_obj', $object_name);
         // style editor
     }
 
@@ -591,7 +618,7 @@ class EAAdminPanel
 
         $settings = $this->options->get_options();
         $settings['rest_url'] = get_rest_url();
-        $settings['rest_url_fullcalendar'] = EAApiFullCalendar::get_url();
+        $settings['rest_url_fullcalendar'] = EasyEAApiFullCalendar::get_url();
         $settings['export_tags_list'] = $this->models->get_all_tags_for_template();
         $settings['saved_tags_list'] = get_option('ea_excel_columns', '');
 
@@ -626,6 +653,8 @@ class EAAdminPanel
         $data_vacation = $this->options->get_option_value('vacations', '[]');
 
         $settings['date_format'] = $this->datetime->convert_to_moment_format(get_option('date_format', 'F j, Y'));
+
+        
 
         wp_localize_script('ea-appointments', 'ea_settings', $settings);
         wp_localize_script('ea-appointments', 'ea_vacations', json_decode($data_vacation));
@@ -719,7 +748,7 @@ class EAAdminPanel
 
         $settings = $this->options->get_options();
         $settings['rest_url'] = get_rest_url();
-        $settings['rest_url_vacation'] = EAVacationActions::get_url();
+        $settings['rest_url_vacation'] = EasyEAVacationActions::get_url();
 
         $wpurl = get_bloginfo('wpurl');
         $url   = get_bloginfo('url');
@@ -865,7 +894,7 @@ class EAAdminPanel
 
         $settings = $this->options->get_options();
         $settings['rest_url'] = get_rest_url();
-        $settings['rest_url_clear_log'] = EALogActions::clear_error_url();
+        $settings['rest_url_clear_log'] = EasyEALogActions::clear_error_url();
        
         $settings['image_base'] = str_replace("/wp-content", "", content_url());
         wp_localize_script('ea-admin-bundle', 'ea_settings', $settings);
@@ -904,7 +933,7 @@ class EAAdminPanel
 
 //        $settings['image_base'] = $wpurl === $url ? '' : $wpurl;
         $settings['image_base'] = str_replace("/wp-content", "", content_url());
-        $settings['rest_url_extend_connections'] = EALogActions::extend_connection_url();
+        $settings['rest_url_extend_connections'] = EasyEALogActions::extend_connection_url();
 
         wp_localize_script('ea-admin-bundle', 'ea_settings', $settings);
 
@@ -933,11 +962,13 @@ class EAAdminPanel
 
         // Pagination
         $per_page = 10;
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
         $offset = ($paged - 1) * $per_page;
 
         // Search
-        $search = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $search = isset($_GET['s']) ? sanitize_text_field(wp_unslash($_GET['s'])) : '';
         $search_sql = '';
         $search_params = [];
 
@@ -950,16 +981,20 @@ class EAAdminPanel
         // Total count
         $total_sql = "SELECT COUNT(*) FROM $table " . ($search_sql ? $search_sql : '');
         if (!empty($search_sql)) {
+            // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             $total_customers = $wpdb->get_var($wpdb->prepare($total_sql, ...$search_params));
         } else {
+            // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             $total_customers = $wpdb->get_var($total_sql);
         }
 
         // Fetch paginated data
         $query_sql = "SELECT * FROM $table " . ($search_sql ? $search_sql : '') . " ORDER BY id DESC LIMIT %d OFFSET %d";
         if (!empty($search_sql)) {
+            // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             $customers = $wpdb->get_results($wpdb->prepare($query_sql, ...array_merge($search_params, [$per_page, $offset])));
         } else {
+            // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             $customers = $wpdb->get_results($wpdb->prepare($query_sql, $per_page, $offset));
         }
 
@@ -985,7 +1020,7 @@ class EAAdminPanel
         $wpurl = get_bloginfo('wpurl');
         $url   = get_bloginfo('url');
         $settings['image_base'] = str_replace("/wp-content", "", content_url());
-        $settings['rest_url_extend_connections'] = EALogActions::extend_connection_url();
+        $settings['rest_url_extend_connections'] = EasyEALogActions::extend_connection_url();
 
         wp_localize_script('ea-admin-bundle', 'ea_settings', $settings);
 
@@ -1019,7 +1054,7 @@ class EAAdminPanel
 
         $settings = $this->options->get_options();
         $settings['rest_url'] = get_rest_url();
-        $settings['rest_url_clear_log'] = EALogActions::clear_error_url();
+        $settings['rest_url_clear_log'] = EasyEALogActions::clear_error_url();
 
         $wpurl = get_bloginfo('wpurl');
         $url   = get_bloginfo('url');
@@ -1052,7 +1087,7 @@ class EAAdminPanel
 
         $settings = $this->options->get_options();
         $settings['rest_url'] = get_rest_url();
-        $settings['rest_url_fullcalendar'] = EAApiFullCalendar::get_url();
+        $settings['rest_url_fullcalendar'] = EasyEAApiFullCalendar::get_url();
         $settings['export_tags_list'] = $this->models->get_all_tags_for_template();
         $settings['saved_tags_list'] = get_option('ea_excel_columns', '');
 
@@ -1079,6 +1114,7 @@ class EAAdminPanel
         $aps_tags = ini_get('asp_tags');
 
         if (!empty($aps_tags)) {
+            // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged
             if (ini_set('asp_tags', '0') === false) {
                 return true;
             }
@@ -1087,5 +1123,99 @@ class EAAdminPanel
         return false;
     }
 
+    
+
 
 }
+
+function easy_ea_newsletter_form(){
+	
+        $hide_form = get_option('ea_hide_newsletter');
+
+        // Newsletter marker. Set this to false once newsletter subscription is displayed.
+            $ea_newsletter = true;
+
+        if ( $ea_newsletter === true && $hide_form !== 'yes') { ?>
+        <div class="ea-newsletter-wrapper">
+            <div class="plugin-card plugin-card-ea-newsletter" style="margin :10px; background: #2271b1  url('<?php echo esc_url( plugin_dir_url( __DIR__ ) . 'img/email.png'); ?>') no-repeat right top;">
+                            
+                        <div class="plugin-card-top" style="min-height: 135px; color: white;">
+                            <span class="dashicons dashicons-dismiss ea_newsletter_hide" style="float: right;cursor: pointer;"></span>
+                            <span style="clear:both;"></span>
+                            <div class="name column-name" style="margin: 0px 10px;">
+                                <h3 style="color:white;"><?php esc_html_e( 'Easy Appointments Newsletter', 'easy-appointments' ); ?></h3>
+                            </div>
+                            <div class="desc column-description" style="margin: 0px 10px; color:white;">
+                                <p style="margin-left:0px;"><?php esc_html_e( 'Learn more about easy appointments and get latest updates about plugin', 'easy-appointments' ); ?></p>
+                            </div>
+                            
+                            <div class="ea-newsletter-form" style="margin: 18px 10px 0px;">
+                            
+                                <form method="post" action="https://ea.com/newsletter/" target="_blank" id="ea_newsletter">
+                                    <fieldset>
+                                        <input name="newsletter-email" value="<?php $user = wp_get_current_user(); echo esc_attr( $user->user_email ); ?>" placeholder="<?php esc_html_e( 'Enter your email', 'easy-appointments' ); ?>" style="width: 60%; margin-left: 0px;" type="email">		
+                                        <input name="source" value="ea-plugin" type="hidden">
+                                        <input type="submit" class="button" value="<?php esc_html_e( 'Subscribe', 'easy-appointments' ); ?>" style="background: linear-gradient(to right, #c6ccd1, #bdd0d3) !important !important; box-shadow: unset;">
+                                        <span class="ea_newsletter_hide" style="box-shadow: unset;cursor: pointer;margin-left: 10px; color:white;">
+                                        <?php esc_html_e( 'No thanks', 'easy-appointments' ); ?>
+                                        </span>
+                                        <small style="display:block; margin-top:8px; color:white;"><?php esc_html_e( 'we\'ll share our <code>root</code> password before we share your email with anyone else.', 'easy-appointments' ); ?></small>
+                                        
+                                    </fieldset>
+                                </form>
+                                
+                            </div>
+                            
+                        </div>
+                                    
+                    </div>
+            </div>
+        <?php }
+                // Set newsletter marker to false
+                $ea_newsletter = false;
+    }
+
+    function easy_ea_newsletter_submit(){
+	
+        if (isset( $_REQUEST['ea_security_nonce'] ) && current_user_can('manage_options') && (wp_verify_nonce( sanitize_text_field( wp_unslash( $_REQUEST['ea_security_nonce'] ) ), 'ea_ajax_check_nonce' ) )){
+        global $current_user;
+        $api_url = 'http://magazine3.company/wp-json/api/central/email/subscribe';
+        $email = "";
+        if ( isset($_POST['email']) ) {
+            $email = sanitize_email( wp_unslash( $_POST['email'] ) );
+        }
+        $api_params = array(
+            'name' => sanitize_text_field($current_user->display_name),
+            'email'=> $email,
+            'website'=> sanitize_url( get_site_url() ),
+            'type'=> 'easyappointments'
+        );
+        $response = wp_remote_post( $api_url, array( 'timeout' => 15, 'sslverify' => false, 'body' => $api_params ) );
+        if ( !is_wp_error( $response ) ) {
+            $response = wp_remote_retrieve_body( $response );
+            echo wp_json_encode(array('status'=>200, 'message'=>esc_html__('Submitted ','easy-appointments'), 'response'=> $response));
+        }else{
+            echo wp_json_encode(array('status'=>500, 'message'=>esc_html__('No response from API','easy-appointments')));	
+        }
+    }
+    else{
+        echo wp_json_encode(array('status'=>403, 'message'=>esc_html__('Unauthorized Request','easy-appointments')));
+    }
+        die;
+    }
+    add_action( 'wp_ajax_easy_ea_newsletter_submit', 'easy_ea_newsletter_submit' );
+
+    function easy_ea_newsletter_hide_form(){   
+        if (isset( $_REQUEST['ea_security_nonce'] ) && current_user_can( 'manage_options') && (wp_verify_nonce( sanitize_text_field( wp_unslash($_REQUEST['ea_security_nonce'] ) ), 'ea_ajax_check_nonce' ) )){
+                $hide_newsletter  = get_option('ea_hide_newsletter');
+                if($hide_newsletter == false){
+                    add_option( 'ea_hide_newsletter', 'no');
+                }
+                update_option( 'ea_hide_newsletter', 'yes' , false);
+                echo wp_json_encode(array('status'=>200, 'message'=>esc_html__('Submitted ','easy-appointments')));
+        }else{
+            echo wp_json_encode(array('status'=>403, 'message'=>esc_html__('Unauthorized Request','easy-appointments')));
+        }
+        die;
+    }
+    add_action( 'wp_ajax_easy_ea_newsletter_hide_form', 'easy_ea_newsletter_hide_form' );

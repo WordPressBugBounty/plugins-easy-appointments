@@ -63,6 +63,25 @@
                     return true;
                 }
 
+                //  Check if it's a full-day vacation
+                if (vacation.time && vacation.time.fullDay === false) {
+                    var startTime = vacation.time.startTime ? moment(vacation.time.startTime) : null;
+                    var endTime = vacation.time.endTime ? moment(vacation.time.endTime) : null;
+
+                    if (startTime && endTime) {
+                        // attach a flag so we can disable specific time slots later
+                        if (!window.ea_partial_vacations) window.ea_partial_vacations = [];
+                        window.ea_partial_vacations.push({
+                            day: day,
+                            start: startTime.format('HH:mm'),
+                            end: endTime.format('HH:mm'),
+                            workerId: workerId,
+                            tooltip: vacation.tooltip
+                        });
+                        return true; // don't block the whole day
+                    }
+                }
+
                 response = [false, 'blocked vacation', vacation.tooltip];
 
                 return false;
@@ -188,6 +207,9 @@
                     booking_data.date = parentForm.find('.date').datepicker().val();
                     booking_data.time = parentForm.find('.selected-time').data('val');
                     booking_data.price = parentForm.find('[name="service"] > option:selected').data('price');
+                    if (ea_settings['is_multiple_booking_allowed'] == '1') {
+                        booking_data.price = parentForm.find('.selected-time').length * booking_data.price;
+                    }
 
                     var format = ea_settings['date_format'] + ' ' + ea_settings['time_format'];
                     booking_data.date_time = moment(booking_data.date + 'T' + booking_data.time, ea_settings['defult_detafime_format']).format(format);
@@ -216,8 +238,10 @@
                     // parentForm.find('.step').addClass('disabled');
                     parentForm.find('.final').removeClass('disabled');
 
-                    parentForm.find('.final').find('select,input').first().focus();
-                    plugin.scrollToElement(parentForm.find('.final'));
+                    if (ea_settings['is_multiple_booking_allowed'] != '1') {
+                        parentForm.find('.final').find('select,input').first().focus();
+                        plugin.scrollToElement(parentForm.find('.final'));
+                    }
                     plugin.$element.find('#ea-payment-select').show();
 
                     // trigger global event when time slot is selected
@@ -250,59 +274,113 @@
         selectTimes: function ($element) {
             var plugin = this;
 
-            var serviceData = plugin.$element.find('[name="service"] > option:selected').data();
-            var duration = serviceData.duration;
-            var slot_step = serviceData.slot_step;
+            // =======================
+            // FEATURE FLAG CHECK
+            // =======================
+            if (ea_settings['is_multiple_booking_allowed'] != '1') {
+                // ----------------------------------------
+                // ORIGINAL SINGLE-SLOT LOGIC (unchanged)
+                // ----------------------------------------
+                var serviceData = plugin.$element.find('[name="service"] > option:selected').data();
+                var duration = serviceData.duration;
+                var slot_step = serviceData.slot_step;
 
-            // var takeSlots = parseInt(duration) / parseInt(slot_step);
-            // if (ea_settings["label.from_to"] == "1") {
-            //     takeSlots = 1;
-            // }
-            var takeSlots = 1; // now we do it the same for all
+                var takeSlots = 1; // original logic
+                var $nextSlots = $element.nextAll();
 
-            var $nextSlots = $element.nextAll();
+                var forSelection = [];
+                forSelection.push($element);
 
-            var forSelection = [];
-            forSelection.push($element);
+                if (($nextSlots.length + 1) < takeSlots) {
+                    return false;
+                }
 
-            if (($nextSlots.length + 1) < takeSlots) {
+                $element.parent().children().removeClass('selected-time');
+
+                jQuery.each($nextSlots, function (index, elem) {
+                    var $elem = jQuery(elem);
+
+                    var startTime = moment($element.data('val'), 'HH:mm');
+                    var calculatedTime = (index + 1) * slot_step;
+                    var expectedTime = startTime.add(calculatedTime, 'minutes').format('HH:mm');
+
+                    if ($elem.data('val') !== expectedTime) {
+                        return false;
+                    }
+
+                    if (index + 2 > takeSlots) {
+                        return false;
+                    }
+
+                    if ($elem.hasClass('time-disabled')) {
+                        return false;
+                    }
+
+                    forSelection.push($elem);
+                });
+
+                if (forSelection.length < takeSlots) {
+                    return false;
+                }
+
+                jQuery.each(forSelection, function (index, elem) {
+                    elem.addClass('selected-time');
+                });
+
+                return true;
+            }
+
+            // =======================
+            // NEW MULTI-SLOT LOGIC
+            // =======================
+
+            var slot_step = parseInt(
+                plugin.$element.find('[name="service"] > option:selected').data('slot_step')
+            );
+
+            // If no slot selected yet — user is picking START time
+            if (plugin.multiStart == null) {
+                plugin.multiStart = $element;
+                plugin.$element.find('.time-value').removeClass('selected-time');
+                $element.addClass('selected-time');
+                return true;
+            }
+
+            // If start is selected and user selects end time
+            var startTime = moment(plugin.multiStart.data('val'), 'HH:mm');
+            var endTime = moment($element.data('val'), 'HH:mm');
+
+            if (endTime.isBefore(startTime)) {
+                alert("End time must be after start time.");
+                plugin.multiStart = null;
                 return false;
             }
 
-            $element.parent().children().removeClass('selected-time');
+            // Mark all slots between start → end
+            plugin.$element.find('.time-value').removeClass('selected-time');
 
-            jQuery.each($nextSlots, function (index, elem) {
-                var $elem = jQuery(elem);
+            var current = startTime.clone();
+            while (current <= endTime) {
+                let t = current.format('HH:mm');
+                let $slot = plugin.$element.find('.time-value[data-val="' + t + '"]');
 
-                var startTime = moment($element.data('val'), 'HH:mm');
-                var calculatedTime = (index + 1) * slot_step;
-                var expectedTime = startTime.add(calculatedTime, 'minutes').format('HH:mm');
-
-                if ($elem.data('val') !== expectedTime) {
+                if ($slot.length === 0 || $slot.hasClass('time-disabled')) {
+                    alert("One or more selected slots are unavailable.");
+                    plugin.multiStart = null;
                     return false;
                 }
 
-                if (index + 2 > takeSlots) {
-                    return false;
-                }
-
-                if ($elem.hasClass('time-disabled')) {
-                    return false;
-                }
-
-                forSelection.push($elem);
-            });
-
-            if (forSelection.length < takeSlots) {
-                return false;
+                $slot.addClass('selected-time');
+                current.add(slot_step, 'minutes');
             }
 
-            jQuery.each(forSelection, function (index, elem) {
-                elem.addClass('selected-time');
-            });
+            // Save selected range
+            plugin.multiSelectedStart = startTime.format('HH:mm');
+            plugin.multiSelectedEnd   = endTime.add(slot_step, 'minutes').format('HH:mm');
 
             return true;
         },
+
 
         /**
          * Check if settings are ok
@@ -661,21 +739,29 @@
                 jQuery.each(response, function (index, element) {
                     var selectLabel = fromTo ? element.show + ' - ' + element.ends : element.show;
 
-                    if (element.count > 0) {
-                        // show remaining slots or not
-                        if (ea_settings['show_remaining_slots'] === '1') {
-                            next_element.append('<a href="#" class="time-value slots' + classAMPM + '" data-val="' + element.value + '">' + selectLabel + ' (' + element.count + ')</a>');
-                        } else {
-                            next_element.append('<a href="#" class="time-value' + classAMPM + '" data-val="' + element.value + '">' + selectLabel + '</a>');
-                        }
+                    //  Check if time falls into partial vacation window
+                    var isDisabled = false;
+                    if (window.ea_partial_vacations && window.ea_partial_vacations.length > 0) {
+                        var selectedWorker = plugin.$element.find('[name="worker"]').val();
+                        window.ea_partial_vacations.forEach(function(vac) {
+                            if (vac.day === plugin.settings.currentDate && vac.workerId == selectedWorker) {
+                                var slotTime = moment(element.value, 'HH:mm');
+                                var start = moment(vac.start, 'HH:mm');
+                                var end = moment(vac.end, 'HH:mm');
+                                if (slotTime.isBetween(start, end, null, '[)')) {
+                                    isDisabled = true;
+                                }
+                            }
+                        });
+                    }
+
+                    if (element.count > 0 && !isDisabled) {
+                        next_element.append('<a href="#" class="time-value' + classAMPM + '" data-val="' + element.value + '">' + selectLabel + '</a>');
                     } else {
-                        if (ea_settings['show_remaining_slots'] === '1') {
-                            next_element.append('<a class="time-disabled slots' + classAMPM + '">' + selectLabel + ' (0)</a>');
-                        } else {
-                            next_element.append('<a class="time-disabled' + classAMPM + '">' + selectLabel + '</a>');
-                        }
+                        next_element.append('<a class="time-disabled' + classAMPM + '" title="Vacation">' + selectLabel + '</a>');
                     }
                 });
+
 
                 if (response.length === 0) {
                     next_element.html('<p class="time-message">' + ea_settings['trans.please-select-new-date'] + '</p>');
@@ -862,10 +948,15 @@
                 repeat_end_date: this.$element.find('[name="repeat_end_date"]').val(),
                 date: this.$element.find('.date').datepicker().val(),
                 end_date: this.$element.find('.date').datepicker().val(),
-                start: this.$element.find('.selected-time').data('val'),
                 check: ea_settings['check'],
                 action: 'ea_res_appointment'
             };
+            if (ea_settings['is_multiple_booking_allowed'] == '1' && plugin.multiSelectedEnd) {
+                options.start = plugin.multiSelectedStart;
+                options.end   = plugin.multiSelectedEnd;
+            } else {
+                options.start = this.$element.find('.selected-time').data('val');
+            }
 
             options._cb = Math.floor(Math.random() * 1000000);
 
@@ -1115,7 +1206,9 @@
                 }
             }, 'json')
             .fail(jQuery.proxy(function (response, status, error) {
-                alert(response.responseJSON.message);
+                if (response.responseJSON.message) {
+                    alert(response.responseJSON.message);                    
+                }
                 this.$element.find('.ea-submit').prop('disabled', false);
             }, plugin));
         },
@@ -1149,10 +1242,15 @@
                 repeat_end_date: this.$element.find('[name="repeat_end_date"]').val(),
                 date: this.$element.find('.date').datepicker().val(),
                 end_date: this.$element.find('.date').datepicker().val(),
-                start: this.$element.find('.selected-time').data('val'),
                 check: ea_settings['check'],
                 action: 'ea_res_appointment'
             };
+            if (ea_settings['is_multiple_booking_allowed'] == '1' && plugin.multiSelectedEnd) {
+                options.start = plugin.multiSelectedStart;
+                options.end   = plugin.multiSelectedEnd;
+            } else {
+                options.start = this.$element.find('.selected-time').data('val');
+            }
 
             if (this.$element.find('.g-recaptcha-response').length === 1) {
                 options.captcha = this.$element.find('.g-recaptcha-response').val();
@@ -1373,7 +1471,7 @@
 
 })(jQuery);
 jQuery(document).ready(function () {
-    if (ea_settings['show.customer_search_front'] == 1) {
+    if (ea_settings['allow_customer_search'] == 1) {
         jQuery('#ea_customer_search').select2({
             placeholder: ea_settings['trans.customer_search_label'],
             minimumInputLength: 2,

@@ -180,6 +180,9 @@ class EATableColumns
             'show.iagree',
             'show.display_thankyou_note',
             'show.customer_search_front',
+            'customer_search_password_only',
+            'delete_data_on_uninstall',
+            'customer_search_roles',
             'show_remaining_slots',
             'show_week',
             'sort.locations-by',
@@ -220,7 +223,12 @@ class EATableColumns
             'width',
             'form.label.above',
             'form_class',
-            'label.from_to'
+            'label.from_to',
+            'is_multiple_booking_allowed',
+            'pending_message',
+            'confirmed_message',
+            'reservation_message',
+            'trans.confirmation-title',
         );
 
         foreach ($ea_settings as $key => $value) {
