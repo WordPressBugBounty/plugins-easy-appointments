@@ -371,7 +371,7 @@
             this.$el.find('#fullcalendar-event-template').val(template);
         },
 
-        saveSettings: function() {
+        OldsaveSettings: function() {
             this.updateMailTemplate();
             this.updateFullCalendarTemplate();
 
@@ -424,6 +424,41 @@
             });
 
             this.collection.remove(collectionToBeDeleted, {silent:true});
+
+            var wrapper = new EA.SettingsWrapper({options: this.collection, fields: this.fields});
+            wrapper.save( null, {
+                error: function(response){
+                    alert('There has been some error. Please try later.');
+                },
+                success: function(){
+                    alert('Settings saved!');
+                }
+            });
+        },
+
+        saveSettings: function() {
+            this.updateMailTemplate();
+            this.updateFullCalendarTemplate();
+
+            var fields = this.$el.find('.field');
+
+            var that = this;
+
+            // update only the option models that have corresponding form inputs
+            this.collection.each(function(model) {
+                var key = model.get('ea_key');
+                var input = fields.filter('[data-key="' + key + '"]');
+
+                if (!input.length) {
+                    return;
+                }
+
+                if (input.is('[type="checkbox"]')) {
+                    model.set('ea_value', input.is(':checked') ? 1 : 0);
+                } else {
+                    model.set('ea_value', input.val());
+                }
+            });
 
             var wrapper = new EA.SettingsWrapper({options: this.collection, fields: this.fields});
             wrapper.save( null, {

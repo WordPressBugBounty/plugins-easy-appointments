@@ -5,7 +5,7 @@ Tags: appointment, appointments, Booking, calendar, reservation
 Requires at least: 3.7
 Tested up to: 7.0
 Requires PHP: 5.3
-Stable tag: 3.12.25
+Stable tag: 3.12.26
 License: GPLv2
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -259,6 +259,12 @@ Terms of use and Policy : https://fullcalendar.io/license
 23. Admin panel - Report
 24. Admin panel - Report - Time table overview
 25. Admin panel - Report - Export page
+
+= 3.12.26 (2026-06-12)
+* Fixed Import is not working #285
+* Fixed Stripe button is not visible #287
+* Fixed Vacation disappears when editing Mail box content #290
+* Added Support Full 24/7 Availability and Cross-Midnight Bookings #288
 
 == Changelog ==
 = 3.12.25 (2026-05-12)

@@ -479,6 +479,24 @@ class EAAjax
             wp_send_json_error('Unauthorized');
         }
 
+        if ($_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+            $upload_errors = array(
+                UPLOAD_ERR_INI_SIZE   => esc_html__('File exceeds upload_max_filesize', 'easy-appointments'),
+                UPLOAD_ERR_FORM_SIZE  => esc_html__('File exceeds MAX_FILE_SIZE', 'easy-appointments'),
+                UPLOAD_ERR_PARTIAL    => esc_html__('File partially uploaded', 'easy-appointments'),
+                UPLOAD_ERR_NO_FILE    => esc_html__('No file uploaded', 'easy-appointments'),
+                UPLOAD_ERR_NO_TMP_DIR => esc_html__('Missing temp folder', 'easy-appointments'),
+                UPLOAD_ERR_CANT_WRITE => esc_html__('Failed to write file', 'easy-appointments'),
+                UPLOAD_ERR_EXTENSION  => esc_html__('Upload stopped by extension', 'easy-appointments'),
+            );
+
+            $message = isset($upload_errors[$_FILES['file']['error']])
+                ? $upload_errors[$_FILES['file']['error']]
+                : esc_html__('Unknown upload error', 'easy-appointments');
+
+            wp_send_json_error($message);
+        }
+
         if (empty($_FILES['file']['tmp_name'])) {
             wp_send_json_error('No file uploaded');
         }
@@ -812,6 +830,11 @@ class EAAjax
 
             $start_ts = strtotime($data['date'] . ' ' . $data['start']);
             $end_ts   = strtotime($data['date'] . ' ' . $data['end']);
+
+            if ($end_ts <= $start_ts) {
+                $end_ts = strtotime('+1 day', $end_ts);
+                $data['end_date'] = gmdate('Y-m-d', $end_ts);
+            }
 
             if ($end_ts <= $start_ts) {
                 $this->send_err_json_result('{"err":true,"message":"Invalid range"}');
