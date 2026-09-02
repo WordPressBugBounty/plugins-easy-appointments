@@ -599,8 +599,12 @@ class EAAjax
 
 
     public function ea_ajax_full_export() {
-        // print_r($_REQUEST);die;
         if (isset( $_REQUEST['_wpnonce'] ) && current_user_can('manage_options') && (wp_verify_nonce( sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ), 'ea_ajax_check_nonce' ) )){
+
+            if (function_exists('wp_raise_memory_limit')) {
+                wp_raise_memory_limit('admin');
+            }
+            @set_time_limit(300);
 
             global $wpdb;
 
@@ -618,12 +622,21 @@ class EAAjax
                 $export['tables'][$table] = $wpdb->get_results( "SELECT * FROM {$full}", ARRAY_A );
             }
 
-            header('Content-Type: application/json');
+            while (ob_get_level()) {
+                ob_end_clean();
+            }
+
+            header('Content-Type: application/json; charset=utf-8');
             header('Content-Disposition: attachment; filename=easy-appointments-backup-' . gmdate('Ymd-His') . '.json');
             header('Pragma: no-cache');
             header('Expires: 0');
 
-            echo wp_json_encode($export);
+            $encoded = wp_json_encode($export, JSON_UNESCAPED_UNICODE);
+            if (false === $encoded) {
+                $encoded = json_encode($export, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_UNICODE);
+            }
+
+            echo $encoded;
             exit;
         } else {
             wp_send_json_error('Unauthorized');
@@ -637,6 +650,11 @@ class EAAjax
         }
 
         $this->validate_access_rights( 'tools' );
+
+        if (function_exists('wp_raise_memory_limit')) {
+            wp_raise_memory_limit('admin');
+        }
+        @set_time_limit(300);
 
         if (
             ! isset( $_FILES['file'] ) ||
@@ -672,10 +690,27 @@ class EAAjax
         }
 
         $json = file_get_contents( $tmp_name );
-        $data = json_decode( $json, true );
+        if ( empty( $json ) ) {
+            wp_send_json_error( esc_html__( 'Uploaded file is empty.', 'easy-appointments' ) );
+        }
 
-        if (empty($data['tables'])) {
-            wp_send_json_error('Invalid backup file');
+        // Strip UTF-8 BOM if present
+        $json = preg_replace( '/^\xEF\xBB\xBF/', '', $json );
+
+        $data = json_decode( $json, true );
+        if ( null === $data && function_exists( 'mb_convert_encoding' ) ) {
+            // Attempt conversion to UTF-8 if raw decode failed
+            $json_clean = mb_convert_encoding( $json, 'UTF-8', 'UTF-8' );
+            $data = json_decode( $json_clean, true );
+        }
+
+        if ( null === $data ) {
+            $json_err = json_last_error_msg();
+            wp_send_json_error( sprintf( esc_html__( 'Invalid backup file: JSON parse error (%s)', 'easy-appointments' ), $json_err ) );
+        }
+
+        if ( empty( $data['tables'] ) || ! is_array( $data['tables'] ) ) {
+            wp_send_json_error( esc_html__( 'Invalid backup file: Missing or invalid tables structure.', 'easy-appointments' ) );
         }
 
         global $wpdb;
@@ -720,7 +755,7 @@ class EAAjax
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             $wpdb->query('SET FOREIGN_KEY_CHECKS=1');
 
-            wp_send_json_error('Import failed');
+            wp_send_json_error('Import failed: ' . $e->getMessage());
         }
     }
 
@@ -3913,63 +3948,80 @@ class EAAjax
     public function ajax_search_customers () {
         $settings = $this->options->get_options();
 
-        if (empty($settings['show.customer_search_front']) && !is_user_logged_in()) {
-            wp_send_json([]);
+        // Require login — unauthenticated users have no customer records to search
+        if ( ! is_user_logged_in() ) {
+            wp_send_json( [] );
+            return;
         }
+
+        // Nonce verification
+        check_ajax_referer( 'ea-bootstrap-form', 'check' );
 
         global $wpdb;
         $current_user_id = get_current_user_id();
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-        $q = isset($_GET['q']) ? sanitize_text_field(wp_unslash($_GET['q'])) : '';
+        $q = isset( $_GET['q'] ) ? sanitize_text_field( wp_unslash( $_GET['q'] ) ) : '';
 
-        $like_clause = '%' . $wpdb->esc_like($q) . '%';
-        if (current_user_can('manage_options') || !empty($settings['show.customer_search_front'])) {
+        $like_clause = '%' . $wpdb->esc_like( $q ) . '%';
+
+        if ( current_user_can( 'manage_options' ) ) {
+            // Admins can search all customers
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-            $results = $wpdb->get_results($wpdb->prepare(
+            $results = $wpdb->get_results( $wpdb->prepare(
                 "SELECT id, name, email FROM {$wpdb->prefix}ea_customers WHERE (name LIKE %s OR email LIKE %s) LIMIT 20",
                 $like_clause, $like_clause
-            ));
-        } else {
+            ) );
+        } elseif ( ! empty( $settings['show.customer_search_front'] ) ) {
+            // Non-admin logged-in users: only their own records, even with front search enabled
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-            $results = $wpdb->get_results($wpdb->prepare(
+            $results = $wpdb->get_results( $wpdb->prepare(
                 "SELECT id, name, email FROM {$wpdb->prefix}ea_customers WHERE FIND_IN_SET(%d, user_id) AND (name LIKE %s OR email LIKE %s) LIMIT 20",
                 $current_user_id, $like_clause, $like_clause
-            ));
+            ) );
+        } else {
+            $results = [];
         }
 
-        wp_send_json($results);
+        wp_send_json( $results );
     }
 
     function ajax_customer_detail () {
         $settings = $this->options->get_options();
 
-        if (!empty($settings['show.customer_search_front']) || is_user_logged_in()) {
-            $this->validate_nonce();
-
-            global $wpdb;
-            $current_user_id = get_current_user_id();
-            // phpcs:ignore WordPress.Security.NonceVerification.Missing
-            $id = isset($_POST['id']) ? absint($_POST['id']) : 0;
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-            $cust = $wpdb->get_row($wpdb->prepare(
-                "SELECT id, name, email, mobile, address, user_id FROM {$wpdb->prefix}ea_customers WHERE id = %d", $id
-            ), ARRAY_A);
-
-            if (empty($cust)) {
-                wp_send_json([], 404);
-            }
-
-            if (current_user_can('manage_options') || !empty($settings['show.customer_search_front'])) {
-                wp_send_json($cust);
-            }
-
-            $allowed_user_ids = array_filter(array_map('trim', explode(',', (string) ($cust['user_id'] ?? ''))));
-            if ($current_user_id > 0 && !in_array((string) $current_user_id, $allowed_user_ids, true)) {
-                wp_send_json([], 403);
-            }
-
-            wp_send_json($cust);
+        // Require login — unauthenticated users cannot retrieve customer details
+        if ( ! is_user_logged_in() ) {
+            wp_send_json( [], 403 );
+            return;
         }
+
+        $this->validate_nonce();
+
+        global $wpdb;
+        $current_user_id = get_current_user_id();
+        $id = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $cust = $wpdb->get_row( $wpdb->prepare(
+            "SELECT id, name, email, mobile, address, user_id FROM {$wpdb->prefix}ea_customers WHERE id = %d", $id
+        ), ARRAY_A );
+
+        if ( empty( $cust ) ) {
+            wp_send_json( [], 404 );
+            return;
+        }
+
+        // Admins can view any customer record
+        if ( current_user_can( 'manage_options' ) ) {
+            wp_send_json( $cust );
+            return;
+        }
+
+        // All other users: enforce ownership check — show.customer_search_front does NOT bypass this
+        $allowed_user_ids = array_filter( array_map( 'trim', explode( ',', (string) ( $cust['user_id'] ?? '' ) ) ) );
+        if ( $current_user_id <= 0 || ! in_array( (string) $current_user_id, $allowed_user_ids, true ) ) {
+            wp_send_json( [], 403 );
+            return;
+        }
+
+        wp_send_json( $cust );
     }
 
     public function ea_update_customer_data() {
