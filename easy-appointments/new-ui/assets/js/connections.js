@@ -65,7 +65,18 @@
         jQuery.datepicker.setDefaults(jQuery.datepicker.regional[cfg.datepickerLocale] || {});
 
         function escapeHtml(value) {
-            return $('<div>').text(value === undefined || value === null ? '' : value).html();
+            if (typeof window.eaEscapeHtml === 'function') {
+                return window.eaEscapeHtml(value);
+            }
+            if (value === undefined || value === null) {
+                return '';
+            }
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         var noticeTimer = null;
@@ -424,7 +435,7 @@
             }
 
             window.eaConfirm({
-                title: 'Delete Connections',
+                title: (i18n.deleteConnections || 'Delete Connections'),
                 message: i18n.confirmDeleteSelected.replace('%d', ids.length),
                 confirmLabel: i18n.delete || 'Delete',
                 cancelLabel: i18n.cancel || 'Cancel',
@@ -528,11 +539,11 @@
                 $('.ea-mnui-extend-bar').hide();
             } else if (count === 1) {
                 $('.ea-mnui-extend-bar').show();
-                $('#ea-mnui-extend-info').html('<strong>1 connection has expired</strong> and requires an end date extension to remain active.');
+                $('#ea-mnui-extend-info').html('<strong>' + (i18n.oneConnExpired || '1 connection has expired') + '</strong>' + (i18n.andRequiresEndDateExt || ' and requires an end date extension to remain active.'));
                 $('.ea-mnui-extend-connections').removeClass('ea-mnui-btn-disabled').prop('disabled', false).css('opacity', '1');
             } else {
                 $('.ea-mnui-extend-bar').show();
-                $('#ea-mnui-extend-info').html('<strong>' + count + ' connections have expired</strong> and require an end date extension to remain active.');
+                $('#ea-mnui-extend-info').html('<strong>' + count + (i18n.connsHaveExpired || ' connections have expired') + '</strong>' + (i18n.andRequireEndDateExt || ' and require an end date extension to remain active.'));
                 $('.ea-mnui-extend-connections').removeClass('ea-mnui-btn-disabled').prop('disabled', false).css('opacity', '1');
             }
         }
@@ -626,7 +637,7 @@
         function updateExtendSelectedCount() {
             var total = $('.ea-mnui-extend-row-check').length;
             var checked = $('.ea-mnui-extend-row-check:checked').length;
-            $extendSelectedCount.text(checked + ' of ' + total + ' selected');
+            $extendSelectedCount.text(checked + (i18n.of || ' of ') + total + (i18n.selected || ' selected'));
             $extendSelectAll.prop('checked', total > 0 && checked === total);
         }
 
@@ -640,7 +651,7 @@
                 var todayIso = isoDate(new Date());
                 var infiniteIso = isoDate(addYears(todayIso, 50));
                 $rowDateInput.data('previous-iso', $rowDateInput.data('iso') || isoDate(new Date()));
-                $rowDateInput.val('∞ (Infinite)').data('iso', infiniteIso).prop('disabled', true).css('opacity', '0.5');
+                $rowDateInput.val(i18n.infinite || '∞ (Infinite)').data('iso', infiniteIso).prop('disabled', true).css('opacity', '0.5');
             } else {
                 var restoredIso = $rowDateInput.data('previous-iso') || isoDate(new Date());
                 $rowDateInput.prop('disabled', false).css('opacity', '1');
@@ -693,7 +704,7 @@
             });
 
             if (!selectedConnections.length) {
-                window.alert('Please select at least one connection to extend.');
+                window.alert(i18n.pleaseSelectOneConnToExt || 'Please select at least one connection to extend.');
                 return;
             }
 
@@ -712,14 +723,14 @@
                 })
             }).done(function (response) {
                 closeExtendModal();
-                var msg = (typeof response === 'string' ? response : (response && response.message)) || ('Successfully extended ' + selectedConnections.length + ' connection(s)');
+                var msg = (typeof response === 'string' ? response : (response && response.message)) || ((i18n.successExtended || 'Successfully extended ') + selectedConnections.length + (i18n.connectionS || ' connection(s)'));
                 showNotice(msg);
                 loadConnections();
             }).fail(function () {
                 showNotice(i18n.genericError);
                 hideScreenLoader();
             }).always(function () {
-                $btn.prop('disabled', false).text('Extend Selected Connections');
+                $btn.prop('disabled', false).text(i18n.extendSelConns || 'Extend Selected Connections');
             });
         });
 
@@ -756,15 +767,78 @@
          * ---------- Repeat weeks ----------
          */
         $repeatWeek.on('change', function () {
-            var isCustom = $(this).val() === 'custom';
+            var val = $(this).val();
+            var isCustom = val === 'custom';
+            var isTomorrowOnly = val === '-1';
+
             $repeatCustomWrap.toggle(isCustom);
 
             if (isCustom && !$repeatCustomInput.val()) {
                 $repeatCustomInput.val('3');
             }
+
+            // "Tomorrow Only" mode: auto-select all days, set infinite date range, lock fields.
+            if (isTomorrowOnly) {
+                applyTomorrowOnlyLock();
+            } else {
+                removeTomorrowOnlyLock();
+            }
         });
 
+        /**
+         * Lock down fields for "Tomorrow Only" mode.
+         */
+        function applyTomorrowOnlyLock() {
+            // Select all days of week and disable the chips
+            $('#ea-mnui-days-of-week input').each(function () {
+                $(this).prop('checked', true).prop('disabled', true);
+                $(this).closest('.ea-mnui-chip').addClass('is-checked');
+            });
+
+            // Set date range: today → infinite, lock fields
+            var today = isoDate(new Date());
+            setDayFrom(today);
+            applyUnlimitedEndDate(today);
+            $isUnlimited.prop('checked', true).prop('disabled', true);
+            $dayFrom.prop('disabled', true);
+            $dayFrom.datepicker('disable');
+            toggleDayToDisabled(true);
+
+            // Show helper text
+            if (!$('#ea-mnui-tomorrow-only-note').length) {
+                $('#ea-mnui-days-of-week').after(
+                    '<div id="ea-mnui-tomorrow-only-note" style="margin-top:6px;color:#2563eb;font-size:13px;font-style:italic;">' +
+                    '📅 ' + escapeHtml(i18n.tomorrowOnlyNote || 'Customers can only book appointments for tomorrow\'s date.') +
+                    '</div>'
+                );
+            }
+        }
+
+        /**
+         * Remove "Tomorrow Only" field locks.
+         */
+        function removeTomorrowOnlyLock() {
+            // Re-enable days of week chips
+            $('#ea-mnui-days-of-week input').prop('disabled', false);
+
+            // Re-enable date range fields
+            $isUnlimited.prop('disabled', false);
+            $dayFrom.prop('disabled', false);
+            $dayFrom.datepicker('enable');
+
+            if (!$isUnlimited.is(':checked')) {
+                toggleDayToDisabled(false);
+            }
+
+            // Remove helper text
+            $('#ea-mnui-tomorrow-only-note').remove();
+        }
+
         function getRepeatWeekValue() {
+            if ($repeatWeek.val() === '-1') {
+                return -1;
+            }
+
             if ($repeatWeek.val() === 'custom') {
                 var custom = parseInt($repeatCustomInput.val(), 10);
                 return custom >= 3 ? custom : 3;
@@ -776,14 +850,21 @@
         function setRepeatWeekValue(value) {
             var num = parseInt(value, 10) || 0;
 
-            if (num === 0 || num === 2) {
+            if (num === -1) {
+                $repeatWeek.val('-1');
+                $repeatCustomWrap.hide();
+                $repeatCustomInput.val('');
+                applyTomorrowOnlyLock();
+            } else if (num === 0 || num === 2) {
                 $repeatWeek.val(String(num));
                 $repeatCustomWrap.hide();
                 $repeatCustomInput.val('');
+                removeTomorrowOnlyLock();
             } else {
                 $repeatWeek.val('custom');
                 $repeatCustomWrap.show();
                 $repeatCustomInput.val(num >= 3 ? num : 3);
+                removeTomorrowOnlyLock();
             }
         }
 
@@ -992,7 +1073,7 @@
                 fail($('#ea-mnui-input-slot_count'));
             }
 
-            if (!getSelectedDays().length) {
+            if ($repeatWeek.val() !== '-1' && !getSelectedDays().length) {
                 fail($('#ea-mnui-days-of-week'));
             }
 
@@ -1196,7 +1277,7 @@
             }
 
             window.eaConfirm({
-                title: 'Delete Connection',
+                title: (i18n.deleteConnection || 'Delete Connection'),
                 message: i18n.confirmDelete,
                 confirmLabel: i18n.delete || 'Delete',
                 cancelLabel: i18n.cancel || 'Cancel',
@@ -1243,10 +1324,16 @@
          * ---------- Save (single + bulk) ----------
          */
         function buildSharedPayload() {
+            var repeatVal = getRepeatWeekValue();
+            // "Tomorrow Only" mode: force all days (disabled checkboxes won't be picked up).
+            var dayOfWeek = repeatVal === -1
+                ? WEEK_DAYS.join(',')
+                : getSelectedDays().join(',');
+
             return {
                 slot_count: parseInt($('#ea-mnui-input-slot_count').val(), 10) || 1,
-                day_of_week: getSelectedDays().join(','),
-                repeat_week: getRepeatWeekValue(),
+                day_of_week: dayOfWeek,
+                repeat_week: repeatVal,
                 day_from: getDayFromIso(),
                 day_to: getDayToIso(),
                 time_from: withSeconds($('#ea-mnui-input-time_from').val()),

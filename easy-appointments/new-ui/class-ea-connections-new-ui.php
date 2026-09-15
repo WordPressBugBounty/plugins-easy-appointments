@@ -255,6 +255,20 @@ class EA_Connections_New_UI
                 'timeOrderError'        => esc_html__('End time must be after start time.', 'easy-appointments'),
                 'requiredField'         => esc_html__('This field is required.', 'easy-appointments'),
                 'customWeekError'       => esc_html__('Custom week number must be 3 or more.', 'easy-appointments'),
+                'tomorrowOnlyNote'      => esc_html__('Customers can only book appointments for tomorrow\'s date.', 'easy-appointments'),
+                'deleteConnections'     => esc_html__('Delete Connections', 'easy-appointments'),
+                'oneConnExpired'        => esc_html__('1 connection has expired', 'easy-appointments'),
+                'andRequiresEndDateExt' => esc_html__(' and requires an end date extension to remain active.', 'easy-appointments'),
+                'connsHaveExpired'      => esc_html__(' connections have expired', 'easy-appointments'),
+                'andRequireEndDateExt'  => esc_html__(' and require an end date extension to remain active.', 'easy-appointments'),
+                'of'                    => esc_html__(' of ', 'easy-appointments'),
+                'selected'              => esc_html__(' selected', 'easy-appointments'),
+                'infinite'              => esc_html__('∞ (Infinite)', 'easy-appointments'),
+                'pleaseSelectOneConnToExt' => esc_html__('Please select at least one connection to extend.', 'easy-appointments'),
+                'successExtended'       => esc_html__('Successfully extended ', 'easy-appointments'),
+                'connectionS'           => esc_html__(' connection(s)', 'easy-appointments'),
+                'extendSelConns'        => esc_html__('Extend Selected Connections', 'easy-appointments'),
+                'deleteConnection'      => esc_html__('Delete Connection', 'easy-appointments'),
             ),
         );
     }
@@ -535,7 +549,8 @@ class EA_Connections_New_UI
             );
         }
 
-        $manage_url = admin_url('admin.php?page=easy_app_connections_new');
+        $page_slug  = (class_exists('EA_UI_Switcher') && EA_UI_Switcher::is_new_ui()) ? 'easy_app_connections_new' : 'easy_app_connections';
+        $manage_url = admin_url('admin.php?page=' . $page_slug);
         /* translators: %s: Management URL */
         $body .= sprintf(__("\nPlease log in to your dashboard to manage or extend these connections:\n%s\n\n---\nEasy Appointments", 'easy-appointments'), $manage_url);
 

@@ -604,6 +604,7 @@ class EAAjax
             if (function_exists('wp_raise_memory_limit')) {
                 wp_raise_memory_limit('admin');
             }
+            // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Used for long-running export process.
             @set_time_limit(300);
 
             global $wpdb;
@@ -636,6 +637,7 @@ class EAAjax
                 $encoded = json_encode($export, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_UNICODE);
             }
 
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Direct JSON output for download.
             echo $encoded;
             exit;
         } else {
@@ -654,6 +656,7 @@ class EAAjax
         if (function_exists('wp_raise_memory_limit')) {
             wp_raise_memory_limit('admin');
         }
+        // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Used for long-running import process.
         @set_time_limit(300);
 
         if (
@@ -706,6 +709,7 @@ class EAAjax
 
         if ( null === $data ) {
             $json_err = json_last_error_msg();
+            /* translators: %s: JSON error message */
             wp_send_json_error( sprintf( esc_html__( 'Invalid backup file: JSON parse error (%s)', 'easy-appointments' ), $json_err ) );
         }
 
@@ -960,30 +964,36 @@ class EAAjax
         $body = file_get_contents( 'php://input' );
         $data = json_decode( $body, true );
 
-        if (
-            ! isset( $data['ids'] ) ||
-            ! is_array( $data['ids'] ) ||
-            empty( $data['ids'] )
-        ) {
-            wp_send_json_error(
-                esc_html__(
-                    'No valid IDs provided.',
-                    'easy-appointments'
-                )
-            );
+        $ids = array();
+
+        if ( ! empty( $data ) ) {
+            array_walk_recursive( $data, function( $val ) use ( &$ids ) {
+                $int_val = absint( $val );
+                if ( $int_val > 0 ) {
+                    $ids[] = $int_val;
+                }
+            } );
+            $ids = array_values( array_unique( $ids ) );
         }
 
-        $ids = array_filter(
-            array_map(
-                'absint',
-                $data['ids']
-            )
-        );
+        // phpcs:disable WordPress.Security.NonceVerification.Recommended, WordPress.Security.NonceVerification.Missing -- Nonce is verified in validate_admin_nonce() above.
+        if ( empty( $ids ) && ! empty( $_REQUEST['ids'] ) ) {
+            $raw_ids = wp_unslash( $_REQUEST['ids'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below via absint.
+            $req_ids = is_array( $raw_ids ) ? $raw_ids : explode( ',', sanitize_text_field( $raw_ids ) );
+            foreach ( $req_ids as $val ) {
+                $int_val = absint( $val );
+                if ( $int_val > 0 ) {
+                    $ids[] = $int_val;
+                }
+            }
+            $ids = array_values( array_unique( $ids ) );
+        }
+        // phpcs:enable WordPress.Security.NonceVerification.Recommended, WordPress.Security.NonceVerification.Missing
 
         if ( empty( $ids ) ) {
             wp_send_json_error(
                 esc_html__(
-                    'Invalid IDs.',
+                    'No valid IDs provided.',
                     'easy-appointments'
                 )
             );
@@ -1039,47 +1049,51 @@ class EAAjax
             ? sanitize_text_field( wp_unslash( $_POST['cancel_to'] ) )
             : '';
 
-        if ( 'all' === $cancel_to ) {
-            $this->cancel_upcoming_all();
-        }
-
         $appointments = isset( $_POST['appointments'] ) && is_array( $_POST['appointments'] )
             ? array_map( 'absint', wp_unslash( $_POST['appointments'] ) )
             : [];
+
+        if ( 'all' === $cancel_to && empty( $appointments ) ) {
+            $this->cancel_upcoming_all();
+        }
 
         if ( empty( $appointments ) ) {
             wp_send_json_error( [ 'message' => esc_html__( 'No appointments selected.', 'easy-appointments' ) ] );
         }
 
+        $table = 'ea_appointments';
         $response = false;
-        $appointments = isset($_POST['appointments']) ? array_map('absint', wp_unslash($_POST['appointments'])) : [];
-        $current_datetime = current_time('mysql');
-        foreach ($appointments as $appointment_id) {
-            $appointment = $this->models->get_row('ea_appointments', $appointment_id, ARRAY_A);
-    
-            if ($appointment) {
-                if (strtotime($appointment['date']) > strtotime($current_datetime)) {
-                    $data = [
-                        'status' => 'canceled',
-                        'id' => $appointment_id
-                    ];
-                    foreach ($appointment as $key => $value) {
-                        if (!array_key_exists($key, $data)) {
-                            $data[$key] = $value;
-                        }
-                    }
-                    $table = 'ea_appointments';
-                    $response = $this->models->replace($table, $data, true);
+
+        foreach ( $appointments as $appointment_id ) {
+            $appointment = $this->models->get_row( $table, $appointment_id, ARRAY_A );
+
+            if ( $appointment ) {
+                $old_status = isset( $appointment['status'] ) ? $appointment['status'] : '';
+                if ( 'canceled' === $old_status ) {
+                    $response = true;
+                    continue;
+                }
+
+                $appointment['status'] = 'canceled';
+                $updated = $this->models->replace( $table, $appointment, true );
+
+                if ( false !== $updated ) {
+                    $response = true;
+                    do_action( 'easy_ea_edit_app', $appointment_id );
+                    do_action( 'easy_ea_status_changed', $appointment_id, 'canceled', $old_status, $appointment );
+                    do_action( 'easy_ea_cancel_app', $appointment_id, $appointment );
                 }
             }
         }
-        if ($response === false) {
-            $this->send_err_json_result('{"err":true}');
+
+        if ( false === $response ) {
+            $this->send_err_json_result( '{"err":true}' );
         }
-        $response = new stdClass;
-        $response->data = true;
-    
-        $this->send_ok_json_result($response);
+
+        $response_obj = new stdClass();
+        $response_obj->data = true;
+
+        $this->send_ok_json_result( $response_obj );
     }
 
     public function cancel_upcoming_all() {
@@ -1089,40 +1103,38 @@ class EAAjax
 
         $this->validate_access_rights( 'appointments', 'manage_options' );
         global $wpdb;
-        $current_time = current_time('H:i:s');
-        $current_date = current_time('Y-m-d');
+        $current_time = current_time( 'H:i:s' );
+        $current_date = current_time( 'Y-m-d' );
         $table_name = $wpdb->prefix . 'ea_appointments';
         $query = "
             SELECT * 
             FROM {$table_name}
-            WHERE (date > %s) 
-            OR (date = %s AND start > %s)";
+            WHERE status != %s
+            AND ((date > %s) 
+            OR (date = %s AND start > %s))";
         // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $appointments = $wpdb->get_results($wpdb->prepare($query, $current_date, $current_date, $current_time), ARRAY_A);
-        
-        
-        if (!$appointments) {
-            wp_send_json_error(array('message' => esc_html__('No upcoming appointments found.', 'easy-appointments')));
+        $appointments = $wpdb->get_results( $wpdb->prepare( $query, 'canceled', $current_date, $current_date, $current_time ), ARRAY_A );
+
+        if ( empty( $appointments ) ) {
+            wp_send_json_error( array( 'message' => esc_html__( 'No upcoming appointments found.', 'easy-appointments' ) ) );
         }
-        
-        
-        foreach ($appointments as $appointment) {
+
+        $table = 'ea_appointments';
+        foreach ( $appointments as $appointment ) {
             $appointment_id = $appointment['id'];
-            $update_query = "
-                UPDATE {$table_name}
-                SET status = %s
-                WHERE id = %d
-            ";
-            // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-            $response = $wpdb->query($wpdb->prepare($update_query, 'canceled', $appointment_id));
+            $old_status = isset( $appointment['status'] ) ? $appointment['status'] : '';
+            $appointment['status'] = 'canceled';
+            $this->models->replace( $table, $appointment, true );
+
+            do_action( 'easy_ea_edit_app', $appointment_id );
+            do_action( 'easy_ea_status_changed', $appointment_id, 'canceled', $old_status, $appointment );
+            do_action( 'easy_ea_cancel_app', $appointment_id, $appointment );
         }
-        if ($response === false) {
-            $this->send_err_json_result('{"err":true}');
-        }
-        $response = new stdClass;
-        $response->data = true;
-        
-        $this->send_ok_json_result($response);
+
+        $response_obj = new stdClass();
+        $response_obj->data = true;
+
+        $this->send_ok_json_result( $response_obj );
     }
 
     public function ea_send_query_message(){   
@@ -1509,24 +1521,18 @@ class EAAjax
 
         // sanitize input keys
         $dont_remove = array(
-            'id','location','service','worker','name','email','phone',
+            'location','service','worker','name','email','phone',
             'date','start','end','end_date','description','status',
             'user','created','price','ip','session'
         );
-
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce already validated
-        $app_id = !empty($_REQUEST['id']) ? intval($_REQUEST['id']) : (!empty($_REQUEST['res_app']) ? intval($_REQUEST['res_app']) : 0);
 
         foreach ($data as $key => $rem) {
             if (!in_array($key, $dont_remove)) unset($data[$key]);
         }
 
-        if ($app_id > 0) {
-            $data['id'] = $app_id;
-        } else {
-            unset($data['id']);
-            $data['id'] = null;
-        }
+        // Unauthenticated pre-reservations must always create a new row
+        unset($data['id']);
+        $data['id'] = null;
         unset($data['action']);
 
         $block_time = (int)$this->options->get_option_value('block.time', 0);
@@ -1534,7 +1540,7 @@ class EAAjax
         // Load open slots
         $open_slots = $this->logic->get_open_slots(
             $data['location'], $data['service'], $data['worker'],
-            $data['date'], $app_id > 0 ? $app_id : null, true, $block_time
+            $data['date'], null, true, $block_time
         );
 
         $slots_list = array();
@@ -1649,21 +1655,11 @@ class EAAjax
             // ===========================
 
             $is_free = false;
-            $app_id  = isset($data['id']) ? (int)$data['id'] : 0;
 
-            if ($app_id > 0) {
-                $existing = $this->models->get_row('ea_appointments', $app_id);
-                if ($existing && !empty($existing->id)) {
+            foreach ($open_slots as $slot) {
+                if ($slot['value'] === $data['start'] && $slot['count'] > 0) {
                     $is_free = true;
-                }
-            }
-
-            if (!$is_free) {
-                foreach ($open_slots as $slot) {
-                    if ($slot['value'] === $data['start'] && $slot['count'] > 0) {
-                        $is_free = true;
-                        break;
-                    }
+                    break;
                 }
             }
 
@@ -1725,6 +1721,8 @@ class EAAjax
             }
         }
 
+        unset($data['id']);
+        $data['id'] = null;
         unset($data['action']);
 
         $block_time = (int)$this->options->get_option_value('block.time', 0);
@@ -1732,21 +1730,11 @@ class EAAjax
         // Validate first slot
         $open_slots = $this->logic->get_open_slots($data['location'], $data['service'], $data['worker'], $data['date'], null, true, $block_time);
         $is_free    = false;
-        $app_id     = isset($data['id']) ? (int)$data['id'] : 0;
 
-        if ($app_id > 0) {
-            $existing = $this->models->get_row('ea_appointments', $app_id);
-            if ($existing && !empty($existing->id)) {
+        foreach ($open_slots as $value) {
+            if ($value['value'] === $data['start'] && $value['count'] > 0) {
                 $is_free = true;
-            }
-        }
-
-        if (!$is_free) {
-            foreach ($open_slots as $value) {
-                if ($value['value'] === $data['start'] && $value['count'] > 0) {
-                    $is_free = true;
-                    break;
-                }
+                break;
             }
         }
 
@@ -1902,18 +1890,32 @@ class EAAjax
 
         $data['status'] = $this->options->get_option_value('default.status', 'pending');
 
-        $appointment = $this->models->get_row('ea_appointments', $data['id'], ARRAY_A);
+        $app_id = !empty($data['id']) ? absint($data['id']) : 0;
+        if (empty($app_id)) {
+            $this->send_err_json_result('{"err":true,"message":"Invalid appointment ID"}');
+        }
 
-        
+        $appointment = $this->models->get_row('ea_appointments', $app_id, ARRAY_A);
+
+        if (empty($appointment) || empty($appointment['id'])) {
+            $this->send_err_json_result('{"err":true,"message":"Appointment not found"}');
+        }
+
+        if (isset($appointment['status']) && $appointment['status'] !== 'reservation') {
+            $this->send_err_json_result('{"err":true,"message":"Invalid appointment status"}');
+        }
 
         // check IP
-
         $remote_ip = isset( $_SERVER['REMOTE_ADDR'] )
             ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) )
             : '';
 
-        if ( $appointment['ip'] !== $remote_ip ) {
+        if ( !empty($appointment['ip']) && $appointment['ip'] !== $remote_ip ) {
             $this->send_err_json_result( '{"err":true}' );
+        }
+
+        if (empty($appointment['token'])) {
+            $appointment['token'] = wp_generate_password(32, false);
         }
 
 
@@ -3312,8 +3314,10 @@ class EAAjax
                 }
                 break;
             case 'DELETE':
-                // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-                $data = $_GET;
+                if ( empty( $data['id'] ) ) {
+                    // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.NonceVerification.Missing
+                    $data['id'] = isset( $_REQUEST['id'] ) ? absint( wp_unslash( $_REQUEST['id'] ) ) : 0;
+                }
                 $response = $this->models->delete($table, $data, true);
                 break;
         }
