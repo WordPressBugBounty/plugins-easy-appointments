@@ -13,6 +13,7 @@
             return;
         }
 
+        var i18n = eaNewSettingsUI.i18n || {};
         var $notice = $('#ea-nsui-notice');
         var $saveBtn = $('#ea-nsui-save');
         var $resetBtn = $('#ea-nsui-reset');
@@ -672,11 +673,11 @@
                     '<span class="ea-nsui-file-badge">' + ext + '</span>' +
                     '<span class="ea-nsui-file-name" title="' + safeName + '">' + safeName + '</span>' +
                     '<span class="ea-nsui-file-size">(' + formatFileSize(file.size) + ')</span>' +
-                    '<button type="button" class="ea-nsui-file-clear" id="ea-nsui-file-clear" title="' + (i18n.removeFile || 'Remove file') + '">&times;</button>' +
+                    '<button type="button" class="ea-nsui-file-clear" id="ea-nsui-file-clear" title="' + ((eaNewSettingsUI.i18n && eaNewSettingsUI.i18n.removeFile) || (typeof i18n !== 'undefined' && i18n.removeFile) || 'Remove file') + '">&times;</button>' +
                     '</div>';
                 $info.html(pillHtml);
             } else {
-                $info.html('<span class="ea-nsui-file-placeholder">' + (i18n.noFileChosen || 'No file chosen') + '</span>');
+                $info.html('<span class="ea-nsui-file-placeholder">' + ((eaNewSettingsUI.i18n && eaNewSettingsUI.i18n.noFileChosen) || (typeof i18n !== 'undefined' && i18n.noFileChosen) || 'No file chosen') + '</span>');
             }
         }
 
@@ -692,6 +693,11 @@
                 fileInput.value = '';
             }
             updateSelectedFileInfo();
+        });
+
+        $(document).on('click', '#ea-nsui-file-trigger', function (e) {
+            e.preventDefault();
+            $('#ea-nsui-full-import-file').trigger('click');
         });
 
         // Drag and drop support for custom file box
@@ -751,12 +757,35 @@
                         processData: false,
                         contentType: false
                     }).done(function (res) {
+                        if (res && res.success === false) {
+                            var errMsg = (res && res.data) || eaNewSettingsUI.i18n.importFailed;
+                            showNotice(errMsg, 'error');
+                            return;
+                        }
                         showNotice((res && res.data) || eaNewSettingsUI.i18n.importCompleted, 'success');
                         setTimeout(function () {
                             window.location.reload();
                         }, 1500);
-                    }).fail(function (xhr) {
-                        var message = (xhr.responseJSON && xhr.responseJSON.data) || eaNewSettingsUI.i18n.importFailed;
+                    }).fail(function (xhr, textStatus, errorThrown) {
+                        var message = '';
+                        var i18n = (eaNewSettingsUI && eaNewSettingsUI.i18n) || {};
+                        if (xhr.responseJSON && xhr.responseJSON.data) {
+                            message = xhr.responseJSON.data;
+                        } else if (xhr.status === 413) {
+                            message = i18n.fileTooLarge || 'Upload failed: File exceeds server upload limit (HTTP 413 Payload Too Large). Please increase upload_max_filesize and post_max_size in php.ini.';
+                        } else if (xhr.status === 504 || xhr.status === 502) {
+                            message = i18n.serverTimeout || 'Server timed out during import. The dataset may be too large for current server timeout settings.';
+                        } else if (xhr.status === 500) {
+                            message = i18n.serverError || 'Internal server error (HTTP 500). Please check your server PHP error logs.';
+                        } else if (xhr.status === 403) {
+                            message = i18n.permissionDenied || 'Permission denied or session expired (HTTP 403). Please refresh the page and try again.';
+                        } else if (textStatus === 'timeout') {
+                            message = i18n.requestTimeout || 'Request timed out while importing data.';
+                        } else if (xhr.responseText && xhr.responseText.length < 300 && !/<[a-z][\s\S]*>/i.test(xhr.responseText)) {
+                            message = xhr.responseText;
+                        } else {
+                            message = i18n.importFailed || 'Import failed.';
+                        }
                         showNotice(message, 'error');
                     }).always(function () {
                         $importBtn.prop('disabled', false).text($importBtn.data('original-text') || eaNewSettingsUI.i18n.importData);
@@ -1848,6 +1877,88 @@
 
             $(document).on('change', 'input[data-key="connection_expire.mail_enabled"]', toggleConnectionExpireDays);
             toggleConnectionExpireDays();
+
+            // ---------- Colors & Typography Styling Handlers ----------
+            (function () {
+                var $fontSelect = $('#ea-nsui-font-family-select');
+                var $fontPreview = $('#ea-nsui-font-preview');
+
+                function updateFontPreview() {
+                    var font = $fontSelect.val();
+                    if (!font) {
+                        $fontPreview.css('font-family', 'inherit');
+                        return;
+                    }
+
+                    if (font === 'system') {
+                        $fontPreview.css('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif');
+                        return;
+                    }
+
+                    // Dynamically load Google Font if needed
+                    var googleFonts = ['Source Serif 4', 'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Poppins', 'Playfair Display', 'Merriweather'];
+                    if ($.inArray(font, googleFonts) !== -1) {
+                        var fontId = 'ea-google-font-' + font.toLowerCase().replace(/\s+/g, '-');
+                        if (!$('#' + fontId).length) {
+                            var fontUrl = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(font) + ':wght@400;600&display=swap';
+                            $('head').append('<link id="' + fontId + '" rel="stylesheet" href="' + fontUrl + '">');
+                        }
+                    }
+
+                    $fontPreview.css('font-family', '"' + font + '", sans-serif');
+                }
+
+                $fontSelect.on('change', updateFontPreview);
+                updateFontPreview();
+
+                // Native color picker to hex text input & button preview sync
+                $(document).on('input change', '.ea-nsui-native-color-picker', function () {
+                    var color = $(this).val();
+                    var $card = $(this).closest('.ea-nsui-color-card');
+                    $card.find('.ea-nsui-color-picker-btn').css('background-color', color);
+                    $card.find('.ea-nsui-color-hex-input').val(color).trigger('input');
+                });
+
+                // Hex text input to native color picker & button preview sync
+                $(document).on('input change', '.ea-nsui-color-hex-input', function () {
+                    var color = $(this).val().trim();
+                    var $card = $(this).closest('.ea-nsui-color-card');
+                    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) {
+                        $card.find('.ea-nsui-color-picker-btn').css('background-color', color);
+                        $card.find('.ea-nsui-native-color-picker').val(color);
+                    } else if (!color) {
+                        var defaultColor = $card.data('default-color') || '#ffffff';
+                        $card.find('.ea-nsui-color-picker-btn').css('background-color', defaultColor);
+                        $card.find('.ea-nsui-native-color-picker').val(defaultColor);
+                    }
+                });
+
+                // Preset swatch click handler
+                $(document).on('click', '.ea-nsui-color-swatch-btn', function (e) {
+                    e.preventDefault();
+                    var color = $(this).data('color');
+                    var $card = $(this).closest('.ea-nsui-color-card');
+                    $card.find('.ea-nsui-color-hex-input').val(color).trigger('input');
+                    $card.find('.ea-nsui-color-picker-btn').css('background-color', color);
+                    $card.find('.ea-nsui-native-color-picker').val(color);
+                });
+
+                // Reset Colors button handler
+                $('#ea-nsui-reset-styles-btn').on('click', function (e) {
+                    e.preventDefault();
+                    $('.ea-nsui-color-card').each(function () {
+                        var $card = $(this);
+                        var defaultColor = $card.data('default-color') || '';
+                        $card.find('.ea-nsui-color-hex-input').val('').trigger('input');
+                        if (defaultColor) {
+                            $card.find('.ea-nsui-color-picker-btn').css('background-color', defaultColor);
+                            $card.find('.ea-nsui-native-color-picker').val(defaultColor);
+                        }
+                    });
+                    $fontSelect.val('').trigger('change');
+                    showNotice(i18n.colorsReset || 'Colors reset to theme defaults. Click "Save Changes" to apply.', 'success');
+                });
+            })();
         })();
     });
 })(jQuery);

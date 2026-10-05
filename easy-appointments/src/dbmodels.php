@@ -273,6 +273,10 @@ class EADBModels
      */
     public function replace($table_name, $data, $json = false, $forceStrings = false)
     {
+        if ($table_name === 'ea_appointments' && (empty($data['id']) || $data['id'] == '-1') && empty($data['created'])) {
+            $data['created'] = current_time('mysql', 1);
+        }
+
         // strip out fields that are not mapped inside table
         $this->table_columns->clear_data($table_name, $data);
 
@@ -569,7 +573,7 @@ class EADBModels
         $table_fields = $this->wpdb->prefix . 'ea_fields';
 
         /* phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare */
-        $query = $this->wpdb->prepare("SELECT a.*, s.name AS service_name, s.duration AS service_duration, s.description AS service_description, s.price AS service_price, w.name AS worker_name, w.email AS worker_email, w.phone AS worker_phone, w.description AS worker_description, l.name AS location_name, l.address AS location_address, l.location AS location_location FROM {$table_app} a JOIN {$table_services} s ON (a.service = s.id) JOIN {$table_locations} l ON (a.location = l.id) JOIN {$table_workers} w ON (a.worker = w.id) WHERE a.id = %d", $id);
+        $query = $this->wpdb->prepare("SELECT a.*, s.name AS service_name, s.duration AS service_duration, s.description AS service_description, s.price AS service_price, w.name AS worker_name, w.email AS worker_email, w.phone AS worker_phone, w.description AS worker_description, l.name AS location_name, l.address AS location_address, l.location AS location_location FROM {$table_app} a LEFT JOIN {$table_services} s ON (a.service = s.id) LEFT JOIN {$table_locations} l ON (a.location = l.id) LEFT JOIN {$table_workers} w ON (a.worker = w.id) WHERE a.id = %d", $id);
 
         // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared, 
         $results = $this->wpdb->get_results($query, ARRAY_A);
@@ -581,6 +585,32 @@ class EADBModels
         if (count($results) == 1) {
             foreach ($fields as $f) {
                 $results[0][$f->slug] = $f->value;
+            }
+
+            // Fallback for customer fields if linked via customer_id
+            if (!empty($results[0]['customer_id'])) {
+                $table_customers = $this->wpdb->prefix . 'ea_customers';
+                // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                $customer_query  = $this->wpdb->prepare("SELECT * FROM {$table_customers} WHERE id = %d", (int)$results[0]['customer_id']);
+                // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.NotPrepared
+                $customer        = $this->wpdb->get_row($customer_query, ARRAY_A);
+                if ($customer) {
+                    if (empty($results[0]['name']) && !empty($customer['name'])) {
+                        $results[0]['name'] = $customer['name'];
+                    }
+                    if (empty($results[0]['email']) && !empty($customer['email'])) {
+                        $results[0]['email'] = $customer['email'];
+                    }
+                    if (empty($results[0]['phone']) && !empty($customer['mobile'])) {
+                        $results[0]['phone'] = $customer['mobile'];
+                    }
+                    if (empty($results[0]['address']) && !empty($customer['address'])) {
+                        $results[0]['address'] = $customer['address'];
+                    }
+                    if (empty($results[0]['dob']) && !empty($customer['dob'])) {
+                        $results[0]['dob'] = $customer['dob'];
+                    }
+                }
             }
 
             return $results[0];
@@ -807,6 +837,17 @@ class EADBModels
         /**
          *
          */
+        if ('ea_services' === $table_name) {
+            $order_by_sequence = $this->options->get_option_value('services.order_by_sequence', '0');
+            $sort_services_by  = $this->options->get_option_value('sort.services-by', 'id');
+            if ($order_by_sequence === '1' || $order_by_sequence === 1 || $order_by_sequence === true || $sort_services_by === 'sequence') {
+                if ($as_string) {
+                    return " ORDER BY `sequence` ASC, `id` ASC";
+                }
+                return array('sequence' => 'ASC', 'id' => 'ASC');
+            }
+        }
+
         $mapping = array(
             'ea_locations' => array(
                 'sort'  => 'sort.locations-by',

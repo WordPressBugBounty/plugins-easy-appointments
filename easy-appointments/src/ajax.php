@@ -534,7 +534,8 @@ class EAAjax
                     case 'created_date':
                     case 'booking_date':
                     case 'booking_created':
-                        $csv_row[] = $row->created ?? '';
+                        $created_raw = $row->created ?? '';
+                        $csv_row[] = !empty($created_raw) ? get_date_from_gmt($created_raw, 'Y-m-d H:i:s') : '';
                         break;
                     default:
                         if (isset($meta_fields_by_slug[$column])) {
@@ -648,7 +649,7 @@ class EAAjax
     public function ea_ajax_full_import() {
 
         if (! isset( $_REQUEST['_wpnonce'] ) || !wp_verify_nonce( sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ), 'ea_ajax_check_nonce' )) {
-            wp_send_json_error('Unauthorized');
+            wp_send_json_error( esc_html__( 'Security check failed (Invalid or expired nonce). Please refresh the page and try again.', 'easy-appointments' ) );
         }
 
         $this->validate_access_rights( 'tools' );
@@ -658,30 +659,43 @@ class EAAjax
         }
         // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Used for long-running import process.
         @set_time_limit(300);
+        // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Used for long-running import process.
+        @ini_set('max_execution_time', '300');
+
+        $content_length = isset( $_SERVER['CONTENT_LENGTH'] ) ? (int) $_SERVER['CONTENT_LENGTH'] : 0;
+        if ( $content_length > 0 && empty( $_POST ) && empty( $_FILES ) ) {
+            $post_max = ini_get( 'post_max_size' );
+            /* translators: %s: post_max_size value */
+            wp_send_json_error( sprintf( esc_html__( 'The uploaded file exceeds the server post_max_size directive (%s). Please increase post_max_size and upload_max_filesize in php.ini.', 'easy-appointments' ), $post_max ) );
+        }
 
         if (
             ! isset( $_FILES['file'] ) ||
             ! isset( $_FILES['file']['error'], $_FILES['file']['tmp_name'] )
         ) {
-            wp_send_json_error( esc_html__( 'No file uploaded', 'easy-appointments' ) );
+            wp_send_json_error( esc_html__( 'No file was uploaded or received by the server.', 'easy-appointments' ) );
         }
 
         $file_error = absint( wp_unslash( $_FILES['file']['error'] ) );
 
         if ( UPLOAD_ERR_OK !== $file_error ) {
             $upload_errors = array(
-                UPLOAD_ERR_INI_SIZE   => esc_html__( 'File exceeds upload_max_filesize', 'easy-appointments' ),
-                UPLOAD_ERR_FORM_SIZE  => esc_html__( 'File exceeds MAX_FILE_SIZE', 'easy-appointments' ),
-                UPLOAD_ERR_PARTIAL    => esc_html__( 'File partially uploaded', 'easy-appointments' ),
-                UPLOAD_ERR_NO_FILE    => esc_html__( 'No file uploaded', 'easy-appointments' ),
-                UPLOAD_ERR_NO_TMP_DIR => esc_html__( 'Missing temp folder', 'easy-appointments' ),
-                UPLOAD_ERR_CANT_WRITE => esc_html__( 'Failed to write file', 'easy-appointments' ),
-                UPLOAD_ERR_EXTENSION  => esc_html__( 'Upload stopped by extension', 'easy-appointments' ),
+                /* translators: %s: upload_max_filesize value */
+                UPLOAD_ERR_INI_SIZE   => sprintf( esc_html__( 'The uploaded file exceeds the upload_max_filesize directive in php.ini (Current limit: %s).', 'easy-appointments' ), ini_get( 'upload_max_filesize' ) ),
+                UPLOAD_ERR_FORM_SIZE  => esc_html__( 'The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.', 'easy-appointments' ),
+                UPLOAD_ERR_PARTIAL    => esc_html__( 'The uploaded file was only partially uploaded. Please check your network connection and try again.', 'easy-appointments' ),
+                UPLOAD_ERR_NO_FILE    => esc_html__( 'No file was uploaded.', 'easy-appointments' ),
+                UPLOAD_ERR_NO_TMP_DIR => esc_html__( 'Missing a temporary folder on the server.', 'easy-appointments' ),
+                UPLOAD_ERR_CANT_WRITE => esc_html__( 'Failed to write file to disk. Check server disk space or folder permissions.', 'easy-appointments' ),
+                UPLOAD_ERR_EXTENSION  => esc_html__( 'A PHP extension stopped the file upload.', 'easy-appointments' ),
             );
 
-            $message = isset( $upload_errors[ $file_error ] )
-                ? $upload_errors[ $file_error ]
-                : esc_html__( 'Unknown upload error', 'easy-appointments' );
+            if ( isset( $upload_errors[ $file_error ] ) ) {
+                $message = $upload_errors[ $file_error ];
+            } else {
+                /* translators: %d: Error code */
+                $message = sprintf( esc_html__( 'Unknown file upload error (Code: %d).', 'easy-appointments' ), $file_error );
+            }
 
             wp_send_json_error( $message );
         }
@@ -689,7 +703,7 @@ class EAAjax
         $tmp_name = sanitize_text_field( wp_unslash( $_FILES['file']['tmp_name'] ) );
 
         if ( ! is_uploaded_file( $tmp_name ) ) {
-            wp_send_json_error( esc_html__( 'Invalid uploaded file.', 'easy-appointments' ) );
+            wp_send_json_error( esc_html__( 'Invalid uploaded file: File was not uploaded via HTTP POST.', 'easy-appointments' ) );
         }
 
         $json = file_get_contents( $tmp_name );
@@ -719,6 +733,14 @@ class EAAjax
 
         global $wpdb;
 
+        // Ensure tables exist before importing
+        if (isset($this->install) && method_exists($this->install, 'init_db')) {
+            $this->install->init_db();
+            if (method_exists($this->install, 'ea_create_customers_table')) {
+                $this->install->ea_create_customers_table();
+            }
+        }
+
         // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $wpdb->query('SET FOREIGN_KEY_CHECKS=0');
         // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -728,7 +750,7 @@ class EAAjax
 
             foreach ($this->get_ea_tables() as $table) {
 
-                if (!isset($data['tables'][$table])) {
+                if (!isset($data['tables'][$table]) || !is_array($data['tables'][$table])) {
                     continue;
                 }
 
@@ -737,9 +759,55 @@ class EAAjax
                 // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
                 $wpdb->query("TRUNCATE TABLE {$full}");
 
-                foreach ($data['tables'][$table] as $row) {
-                    // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-                    $wpdb->insert($full, $row);
+                $rows = $data['tables'][$table];
+                if (empty($rows)) {
+                    continue;
+                }
+
+                // Batch insert in chunks of 200 rows to prevent execution timeout on large datasets
+                $chunks = array_chunk($rows, 200);
+
+                foreach ($chunks as $chunk) {
+                    $first_row    = reset($chunk);
+                    $columns      = array_keys($first_row);
+                    $escaped_cols = array_map(function ($col) {
+                        return '`' . str_replace('`', '``', sanitize_key($col)) . '`';
+                    }, $columns);
+                    $col_list     = implode(', ', $escaped_cols);
+
+                    $values_sql       = array();
+                    $placeholders_all = array();
+
+                    foreach ($chunk as $row) {
+                        $row_placeholders = array();
+                        foreach ($columns as $col) {
+                            $val = isset($row[$col]) ? $row[$col] : null;
+                            if ($val === null) {
+                                $row_placeholders[] = 'NULL';
+                            } else {
+                                $values_sql[]       = $val;
+                                $row_placeholders[] = '%s';
+                            }
+                        }
+                        $placeholders_all[] = '(' . implode(', ', $row_placeholders) . ')';
+                    }
+
+                    $sql = "INSERT INTO {$full} ({$col_list}) VALUES " . implode(', ', $placeholders_all);
+
+                    if (!empty($values_sql)) {
+                        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+                        $prepared = $wpdb->prepare($sql, $values_sql);
+                    } else {
+                        $prepared = $sql;
+                    }
+
+                    // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
+                    $result = $wpdb->query($prepared);
+                    if ($result === false) {
+                        /* translators: %s: database table name */
+                        $fallback_err = sprintf( esc_html__( 'Failed to insert into %s', 'easy-appointments' ), $table );
+                        throw new Exception( $wpdb->last_error ? $wpdb->last_error : $fallback_err );
+                    }
                 }
             }
 
@@ -751,7 +819,7 @@ class EAAjax
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching            
             $wpdb->query('SET FOREIGN_KEY_CHECKS=1');
 
-            wp_send_json_success('Import completed');
+            wp_send_json_success(esc_html__('Import completed successfully.', 'easy-appointments'));
 
         } catch (Exception $e) {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -759,7 +827,8 @@ class EAAjax
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             $wpdb->query('SET FOREIGN_KEY_CHECKS=1');
 
-            wp_send_json_error('Import failed: ' . $e->getMessage());
+            /* translators: %s: Error message reason */
+            wp_send_json_error(sprintf(esc_html__('Import failed: %s', 'easy-appointments'), $e->getMessage()));
         }
     }
 
@@ -1342,8 +1411,8 @@ class EAAjax
             return '';
         }
 
-        // Convert UTC ISO timestamp back to site timezone
-        $tz_string = function_exists('wp_timezone_string') ? wp_timezone_string() : get_option('timezone_string');
+        // Convert UTC ISO timestamp back to site timezone (WP 5.0+ compatible)
+        $tz_string = get_option('timezone_string');
         if (empty($tz_string)) {
             $offset = (float) get_option('gmt_offset', 0);
             $hours = (int) $offset;
@@ -3304,6 +3373,27 @@ class EAAjax
                 break;
             case 'UPDATE':
             case 'NEW':
+                if ($table === 'ea_connections' && class_exists('EA_UI_Switcher') && EA_UI_Switcher::is_new_ui()) {
+                    if (!empty($data['time_from']) && !empty($data['time_to']) && !empty($data['service'])) {
+                        $service = $this->models->get_row('ea_services', absint($data['service']));
+                        if ($service && isset($service->duration)) {
+                            $service_duration = intval($service->duration);
+                            $start_ts = strtotime('1970-01-01 ' . trim($data['time_from']));
+                            $end_ts   = strtotime('1970-01-01 ' . trim($data['time_to']));
+                            if ($start_ts !== false && $end_ts !== false) {
+                                $conn_duration = ($end_ts - $start_ts) / 60;
+                                if ($conn_duration < $service_duration) {
+                                    /* translators: 1: Connection duration in minutes, 2: Service duration in minutes */
+                                    $conn_err_msg = sprintf( esc_html__( 'Connection duration (%1$d minutes) must be greater than or equal to the selected service duration (%2$d minutes).', 'easy-appointments' ), $conn_duration, $service_duration );
+                                    $this->send_err_json_result(json_encode(array(
+                                        'err'     => true,
+                                        'message' => $conn_err_msg,
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
                 $response = $this->models->replace($table, $data, true);
                 if ($table === 'ea_staff' && !empty($response->id)) {
                     if ($this->type === 'UPDATE') {
